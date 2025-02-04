@@ -1,0 +1,218 @@
+---
+title: " NYPD Shooting Incident Data"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(readr)
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(sf)
+library(leaflet)
+library(cshapes)
+library(htmltools)
+
+data <- read_csv("NYPD_Shooting_Incident_Data__Historic_.csv")
+
+# First we make our data more visible and check for NA's
+data <- data %>%
+  separate(`INCIDENT_KEY;OCCUR_DATE;OCCUR_TIME;BORO;PRECINCT;JURISDICTION_CODE;LOCATION_DESC;STATISTICAL_MURDER_FLAG;PERP_AGE_GROUP;PERP_SEX;PERP_RACE;VIC_AGE_GROUP;VIC_SEX;VIC_RACE;X_COORD_CD;Y_COORD_CD;Latitude;Longitude;Lon_Lat`,
+          sep = ";",into = c("INCIDENT_KEY","OCCUR_DATE","OCCUR_TIME","BORO",
+                    "PRECINCT","JURISDICTION_CODE","LOCATION_DESC",
+                    "STATISTICAL_MURDER_FLAG","PERP_AGE_GROUP","PERP_SEX",
+                    "PERP_RACE","VIC_AGE_GROUP","VIC_SEX","VIC_RACE","X_COORD_CD",
+                    "Y_COORD_CD","Latitude","Longitude","Lon_Lat"))
+sum(is.na(data))
+
+
+# Plot 1 
+
+plot1 <- data %>%
+  group_by(BORO) %>%
+  summarise(Total_incidents_in_region = n()) %>%
+  ggplot(aes(x=BORO,y=Total_incidents_in_region))+
+  geom_bar(aes(x=BORO),stat = "identity",color="black",fill="grey" ) +
+  labs(title = 'Total Events in every Region') +
+  scale_y_continuous(breaks=seq(0,12000,1000))
+plot1
+
+# Plot 2
+
+plot2 <- data %>%
+  group_by(BORO,VIC_RACE) %>%
+  summarise(Total_incidents_in_region = n()) %>%
+  ggplot(aes(x=BORO,y=Total_incidents_in_region))+
+  geom_bar(aes(x=BORO,fill=VIC_RACE),stat = "identity") +
+  labs(title = 'Total Events in every Region and Victim Race') +
+  scale_y_continuous(breaks=seq(0,12000,1000))
+plot2
+
+# Plot 3
+
+plot3<-data %>%
+  ggplot() +
+  geom_count(mapping = aes(x = PERP_RACE, y = VIC_RACE)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = 'Correlation Between Victim and Perp Race')
+plot3
+
+# Plot 4
+
+plot4 <-mosaicplot(table(data$VIC_SEX,data$VIC_RACE),
+           main="Mosaic for Race and Gender Correlation",
+           xlab="Victim Gender",
+           ylab="Victim Race",las = 1)
+
+# Plot 5
+
+data$PRECINCT<- as.numeric(data$PRECINCT)
+plot5 <-data %>%
+  ggplot(aes(x=PRECINCT,y=BORO))+
+  geom_boxplot(,color="black",fill="grey")+
+  labs(title = 'Boxplots of Precinct in every Neighborhood')+
+  scale_x_continuous(breaks=seq(0,125,5))
+plot5
+
+# Plot 6
+
+plot6 <-data %>%
+  group_by(VIC_AGE_GROUP,PRECINCT)%>%
+  summarize(count = n()) %>%
+  ggplot(aes(x=PRECINCT, y=count,color=VIC_AGE_GROUP))+
+  geom_line()+
+  ggtitle("Total Victims per Age Group")+
+  labs(x = "PRECINCT", y = "Total Medals")+
+  scale_y_continuous(breaks=seq(0,650,50))+
+  scale_x_continuous(breaks=seq(0,125,10))
+plot6
+
+# Plot 7
+
+plot7a <- data %>%
+  select(LOCATION_DESC,VIC_SEX) %>%
+  filter(LOCATION_DESC!="" & VIC_SEX=="M") %>%
+  group_by(LOCATION_DESC) %>%
+  summarise(Total_Men = n()) %>%
+  arrange(desc(Total_Men)) %>%
+  slice(1:8) %>%
+  ggplot(aes(x = "", y = Total_Men, fill = LOCATION_DESC)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") +
+  ggtitle("Victim Men Location")
+
+plot7b<- data %>%
+  select(LOCATION_DESC,VIC_SEX) %>%
+  filter(LOCATION_DESC!="" & VIC_SEX=="F") %>%
+  group_by(LOCATION_DESC) %>%
+  summarise(Total_Men = n()) %>%
+  arrange(desc(Total_Men)) %>%
+  slice(1:8) %>%
+  ggplot(aes(x = "", y = Total_Men, fill = LOCATION_DESC)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") +
+  ggtitle("Victim Women Location")
+
+grid.arrange(plot7a, plot7b, nrow = 2)
+
+# Plot 8
+
+# Transform our df in a sf object
+data$Longitude<-as.numeric(data$Longitude)
+data$Latitude<-as.numeric(data$Latitude)
+sf_data <- st_as_sf(data,coords = c("Longitude","Latitude"),crs=4326)
+
+# create leaflet map centered on New York
+ny_map <- leaflet() %>% 
+setView(lng = -74.0060, lat = 40.7128, zoom = 10)
+
+# add tiles to the map
+ny_map %>% 
+  addTiles() %>% 
+  addCircleMarkers(data = sf_data,
+    radius = 2,
+    label = ~ htmlEscape(VIC_RACE),
+    clusterOptions = markerClusterOptions()
+  ) 
+
+```
+
+
+# TOTAL VICTIMS PER AGE GROUP
+
+```{r}
+library(plotly)
+plot6 <-data %>%
+  group_by(VIC_AGE_GROUP,PRECINCT)%>%
+  summarize(count = n())
+
+# ggplot:
+gg_cov_cases_2 <- plot6 %>%
+  ggplot()+
+  theme_classic()+
+  geom_line(data = plot6, aes(x= PRECINCT, y= count, color = VIC_AGE_GROUP), size= .25, 
+            alpha = .5)+
+  scale_colour_manual(values = c("blue", "red","green","yellow","black","orange"))
+
+# plotly plot:  
+ggplotly(gg_cov_cases_2)
+```
+
+
+# LOCATIONS OF THE SHOOTINGS
+
+```{r}
+# create leaflet map centered on New York
+ny_map <- leaflet() %>% 
+setView(lng = -74.0060, lat = 40.7128, zoom = 10)
+
+# add tiles to the map
+ny_map %>% 
+  addTiles() %>% 
+  addCircleMarkers(data = sf_data,
+    radius = 2,
+    label = ~ htmlEscape(VIC_RACE),
+    clusterOptions = markerClusterOptions()
+  ) 
+```
+
+# WHERE MEN AND WOMEN HANG OUT
+
+```{r}
+grid.arrange(plot7a, plot7b, nrow = 2)
+```
+
+# TOTAL SHOOTINGS IN EVERY REGION
+
+```{r}
+library(highcharter)
+plot1 <- data %>%
+  group_by(BORO) %>%
+  summarise(Total_incidents_in_region = n())
+
+highchart() %>% 
+  hc_xAxis(categories = c("BRONX", "BROOKLYN", "MANHATTAN","QUEENS","STATEN ISLAND")) %>%
+  hc_yAxis(title=list(text='Total_incidents_in_region')) %>%
+  hc_add_series(plot1, "bar", hcaes(x = BORO, y = Total_incidents_in_region, color=c("blue", "red","green","yellow","black"))) %>% 
+  hc_tooltip(pointFormat = "{point.y:.2f}</br>",shared = FALSE) %>% 
+  hc_legend(enabled=FALSE)
+```
+
+# INTERACTIVE BOXPLOTS
+
+```{r}
+library(plotly)
+fig <- plot_ly(x = data$PRECINCT, y = data$BORO, type = "box")
+fig
+```
+
